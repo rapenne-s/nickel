@@ -1,6 +1,7 @@
 use crate::cache::Cache;
 use crate::conversion::State;
 pub use crate::conversion::ToNickel;
+use crate::identifier::Ident;
 use crate::mk_app;
 use crate::parser::utils::mk_span;
 use crate::term::make::{self, if_then_else};
@@ -142,7 +143,16 @@ impl ToNickel for rnix::SyntaxNode {
                 "true" => Term::Bool(true),
                 "false" => Term::Bool(false),
                 "null" => Term::Null,
-                id => Term::Var(id.into()),
+                id => {
+                    if state.env.contains(id) || state.with.is_empty() {
+                        Term::Var(id.into())
+                    } else {
+                        Term::App(
+                            crate::stdlib::compat::with(state.with.clone()),
+                            Term::Str(id.into()).into(),
+                        )
+                    }
+                }
             }
             .into(),
             ParsedType::LegacyLet(_) => panic!("Legacy let form is not supported"), // Probably useless to suport it in a short term.
@@ -154,6 +164,13 @@ impl ToNickel for rnix::SyntaxNode {
                 use crate::identifier::Ident;
                 let mut destruct_vec = Vec::new();
                 let mut fields = HashMap::new();
+                let mut state = state.clone();
+                state.env.extend(n.entries().map(|kv| {
+                    types::Ident::cast(kv.key().unwrap().path().next().unwrap())
+                        .unwrap()
+                        .as_str()
+                        .to_string()
+                }));
                 for kv in n.entries() {
                     // In `let` blocks, the key is suposed to be a single ident so `Path` exactly one
                     // element.
@@ -167,7 +184,7 @@ impl ToNickel for rnix::SyntaxNode {
                         ),
                         s => s.into(),
                     };
-                    let rt = kv.value().unwrap().translate(state);
+                    let rt = kv.value().unwrap().translate(&state);
                     destruct_vec.push(destruct::Match::Simple(id.clone(), Default::default()));
                     fields.insert(id.into(), rt);
                 }
@@ -180,10 +197,14 @@ impl ToNickel for rnix::SyntaxNode {
                         span,
                     },
                     Term::RecRecord(fields, vec![], Default::default(), None),
-                    n.body().unwrap().translate(state),
+                    n.body().unwrap().translate(&state),
                 )
             }
-            ParsedType::With(n) => unimplemented!(),
+            ParsedType::With(n) => {
+                let mut state = state.clone();
+                state.with.push(n.namespace().unwrap().translate(&state));
+                n.body().unwrap().translate(&state)
+            }
 
             ParsedType::Lambda(n) => {
                 let arg = n.arg().unwrap();

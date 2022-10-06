@@ -11,11 +11,13 @@ use std::collections::HashSet;
 
 /// State of the conversion. It contains the definitions in scope of the currently converted node (e.g.:
 /// `with` environments, declared variables, current file id...), required for elaborate compilation (`with`).
+#[derive(Clone)]
 pub struct State {
     /// The current transformation file ID.
     pub file_id: FileId,
     /// Variables in scope.
     pub env: HashSet<String>,
+    pub with: Vec<RichTerm>,
 }
 
 pub trait ToNickel: Sized {
@@ -24,6 +26,7 @@ pub trait ToNickel: Sized {
         let state = State {
             file_id,
             env: HashSet::new(),
+            with: Vec::new(),
         };
         self.translate(&state)
     }
