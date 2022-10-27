@@ -153,6 +153,7 @@ pub enum EnvBuildError {
 
 /// Add the bindings of a record to an environment. Ignore the fields defined by interpolation.
 pub fn env_add_term(env: &mut Environment, rt: RichTerm) -> Result<(), EnvBuildError> {
+    /// TODO: Should we do something here for inherited fields? Have they been transformed already?
     match_sharedterm! {rt.term, with {
             Term::Record(bindings, _) | Term::RecRecord(bindings, ..) => {
                 let ext = bindings.into_iter().map(|(id, t)| {
@@ -520,12 +521,15 @@ where
                     }
                 }
             }
-            Term::RecRecord(ts, dyn_fields, attrs, _) => {
+            Term::RecRecord(ts, dyn_fields, attrs, _, inh) => {
                 let rec_env = fixpoint::rec_env(ts.iter(), &env)?;
 
                 ts.iter()
                     .try_for_each(|(_, rt)| fixpoint::patch_field(rt, &rec_env, &env))?;
 
+                // TODO: do we need to do something with inherited fields here? they should have
+                // been transformed before this step right?
+                assert_eq!(inh.len(), 0);
                 //TODO: We should probably avoid cloning the `ts` hashmap, using `match_sharedterm`
                 //instead of `match` in the main eval loop, if possible
                 let static_part = RichTerm::new(Term::Record(ts.clone(), attrs.clone()), pos);
@@ -778,7 +782,7 @@ pub fn subst(rt: RichTerm, global_env: &Environment, env: &Environment) -> RichT
 
             RichTerm::new(Term::Record(map, attrs), pos)
         }
-        Term::RecRecord(map, dyn_fields, attrs, deps) => {
+        Term::RecRecord(map, dyn_fields, attrs, deps, inh) => {
             let map = map
                 .into_iter()
                 .map(|(id, t)| {
@@ -788,6 +792,8 @@ pub fn subst(rt: RichTerm, global_env: &Environment, env: &Environment) -> RichT
                     )
                 })
                 .collect();
+
+                assert_eq!(inh.len(), 0);
 
             let dyn_fields = dyn_fields
                 .into_iter()
@@ -799,7 +805,7 @@ pub fn subst(rt: RichTerm, global_env: &Environment, env: &Environment) -> RichT
                 })
                 .collect();
 
-            RichTerm::new(Term::RecRecord(map, dyn_fields, attrs, deps), pos)
+            RichTerm::new(Term::RecRecord(map, dyn_fields, attrs, deps, inh), pos)
         }
         Term::Array(ts, attrs) => {
             let ts = ts

@@ -94,6 +94,7 @@ pub enum Term {
         Vec<(RichTerm, RichTerm)>, /* field whose name is defined by interpolation */
         RecordAttrs,
         Option<RecordDeps>, /* dependency tracking between fields. None before the free var pass */
+        Vec<(Vec<Ident>, Option<RichTerm>)>, /* inherited fields with optional record from which to inherit */
     ),
     /// A switch construct. The evaluation is done by the corresponding unary operator, but we
     /// still need this one for typechecking.
@@ -374,11 +375,15 @@ impl Term {
             Record(ref mut static_map, _) => {
                 static_map.iter_mut().for_each(|(_, t)| func(t));
             }
-            RecRecord(ref mut static_map, ref mut dyn_fields, ..) => {
+            RecRecord(ref mut static_map, ref mut dyn_fields, _, _, ref mut inh) => {
                 static_map.iter_mut().for_each(|(_, t)| func(t));
                 dyn_fields.iter_mut().for_each(|(t1, t2)| {
                     func(t1);
                     func(t2);
+                });
+                inh.iter_mut().for_each(|(_, t)| match t {
+                    Some(t) => func(t),
+                    _ => (),
                 });
             }
             Bool(_) | Num(_) | Str(_) | Lbl(_) | Var(_) | Sym(_) | Enum(_) | Import(_)
@@ -527,6 +532,10 @@ impl Term {
     pub fn deep_repr(&self) -> String {
         match self {
             Term::Record(fields, _) | Term::RecRecord(fields, ..) => {
+                // TODO: do we still have
+                // `RecRecord`s at this
+                // time? if so, print
+                // correctly inherits.
                 let fields_str: Vec<String> = fields
                     .iter()
                     .map(|(ident, term)| format!("{} = {}", ident, term.as_ref().deep_repr()))
@@ -706,10 +715,6 @@ impl Deref for SharedTerm {
 /// y`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UnaryOp {
-    // WIP!
-    // Nix like inherit keyword, implemented as an operator in nickel.
-    // Only used for Nix compatibility. Do not try to use it in Nickel.
-    __Inherit__(Vec<Ident>),
     /// If-then-else.
     Ite(),
 
@@ -901,10 +906,6 @@ impl UnaryOp {
 /// Primitive binary operators
 #[derive(Clone, Debug, PartialEq)]
 pub enum BinaryOp {
-    // WIP!
-    // Nix like "inherit from" keyword, implemented as an operator in nickel.
-    // Only used for Nix compatibility. Do not try to use it in Nickel.
-    __Inherit__(Vec<Ident>),
     /// Addition of numerals.
     Plus(),
     /// Substraction of numerals.
@@ -1202,13 +1203,18 @@ impl RichTerm {
                     pos,
                 )
             },
-            Term::RecRecord(map, dyn_fields, attrs, deps) => {
+            Term::RecRecord(map, dyn_fields, attrs, deps, inh) => {
                 // The annotation on `map_res` uses Result's corresponding trait to convert from
                 // Iterator<Result> to a Result<Iterator>
                 let map_res: Result<HashMap<Ident, RichTerm>, E> = map
                     .into_iter()
                     // For the conversion to work, note that we need a Result<(Ident,RichTerm), E>
                     .map(|(id, t)| Ok((id, t.traverse(f, state, order)?)))
+                    .collect();
+                let inh_res: Result<Vec<(Vec<_>, Option<RichTerm>)>, E> = inh
+                    .into_iter()
+                    // For the conversion to work, note that we need a Result<(Ident,RichTerm), E>
+                    .map(|(ids, t)| Ok((ids, t.map(|t| t.traverse(f, state, order)).transpose()?)))
                     .collect();
                 let dyn_fields_res: Result<Vec<(RichTerm, RichTerm)>, E> = dyn_fields
                     .into_iter()
@@ -1220,7 +1226,7 @@ impl RichTerm {
                     })
                     .collect();
                 RichTerm::new(
-                    Term::RecRecord(map_res?, dyn_fields_res?, attrs, deps),
+                    Term::RecRecord(map_res?, dyn_fields_res?, attrs, deps, inh_res?),
                     pos,
                 )
             },

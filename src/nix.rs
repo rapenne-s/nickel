@@ -133,15 +133,16 @@ impl ToNickel for rnix::SyntaxNode {
                         elaborate_field_path(p, val)
                     })
                     .collect();
-                let rec = RichTerm::from(build_record(fields, Default::default()));
-                n.inherits().fold(rec, |rt, inh| {
-                    let term_from = inh.from().map(|n| n.node().clone().translate(state));
-                    let ids: Vec<Ident> = inh.idents().map(|id| id.as_str().into()).collect();
-                    term_from.map_or(
-                        make::op1(UnaryOp::__Inherit__(ids.clone()), rt.clone()),
-                        |tf| make::op2(BinaryOp::__Inherit__(ids), tf, rt),
-                    )
-                })
+                let inherited: Vec<(_, Option<RichTerm>)> = n
+                    .inherits()
+                    .map(|inh| {
+                        let term_from = inh.from().map(|n| n.node().clone().translate(state));
+                        let ids: Vec<Ident> = inh.idents().map(|id| id.as_str().into()).collect();
+                        (ids, term_from)
+                    })
+                    .collect();
+
+                RichTerm::from(build_record(fields, Default::default()))
             }
 
             // In nix it's allowed to define vars named `true`, `false` or `null`.
@@ -204,7 +205,7 @@ impl ToNickel for rnix::SyntaxNode {
                         rest: None,
                         span,
                     },
-                    Term::RecRecord(fields, vec![], Default::default(), None),
+                    Term::RecRecord(fields, vec![], Default::default(), None, vec![]),
                     n.body().unwrap().translate(&state),
                 )
             }

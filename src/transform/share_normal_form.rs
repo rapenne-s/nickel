@@ -68,7 +68,7 @@ pub fn transform_one(rt: RichTerm) -> RichTerm {
 
                 with_bindings(Term::Record(map, attrs), bindings, pos)
             },
-            Term::RecRecord(map, dyn_fields, attrs, deps) => {
+            Term::RecRecord(map, dyn_fields, attrs, deps, _inh) => {
                 // When a recursive record is evaluated, all fields need to be turned to closures
                 // anyway (see the corresponding case in `eval::eval()`), which is what the share
                 // normal form transformation does. This is why the test is more lax here than for
@@ -137,7 +137,7 @@ pub fn transform_one(rt: RichTerm) -> RichTerm {
                     })
                     .collect();
 
-                with_bindings(Term::RecRecord(map, dyn_fields, attrs, deps), bindings, pos)
+                with_bindings(Term::RecRecord(map, dyn_fields, attrs, deps, _inh), bindings, pos)
             },
             Term::Array(ts, attrs) => {
                 let mut bindings = Vec::with_capacity(ts.len());

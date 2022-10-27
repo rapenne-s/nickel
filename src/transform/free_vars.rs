@@ -105,7 +105,7 @@ fn collect_free_vars(rt: &mut RichTerm, free_vars: &mut HashSet<Ident>) {
                 collect_free_vars(t, free_vars);
             }
         }
-        Term::RecRecord(map, dyn_fields, _, deps) => {
+        Term::RecRecord(map, dyn_fields, _, deps, _inh) => {
             let rec_fields: HashSet<Ident> = map.keys().cloned().collect();
             let mut fresh = HashSet::new();
             let mut new_deps = RecordDeps {

@@ -298,7 +298,8 @@ mod doc {
             Term::MetaValue(MetaValue { doc: Some(md), .. }) => {
                 document.append(&mut parse_documentation(header_level, arena, &md, options))
             }
-            Term::Record(hm, _) | Term::RecRecord(hm, _, _, _) => {
+            Term::Record(hm, _)
+            | Term::RecRecord(hm, _, _, _, _ /*inh TODO: what to do here? */) => {
                 for (ident, rt) in hm {
                     let header = mk_header(&ident.label, header_level + 1, arena);
                     document.append(header);

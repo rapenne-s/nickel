@@ -253,7 +253,7 @@ where
         }
     });
 
-    Term::RecRecord(static_map, dynamic_fields, attrs, None)
+    Term::RecRecord(static_map, dynamic_fields, attrs, None, vec![])
 }
 
 /// Merge two fields by performing the merge of both their value and MetaValue if any.

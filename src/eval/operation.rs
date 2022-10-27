@@ -1092,7 +1092,6 @@ fn process_unary_operation(
                 ))
             }
         }
-        UnaryOp::__Inherit__(_) => panic!("this Op shoud have been desugared before evaluation"),
     }
 }
 
@@ -2148,7 +2147,6 @@ fn process_binary_operation(
                 },
             )),
         },
-        BinaryOp::__Inherit__(_) => panic!("this Op should have been desugared before evaluation"),
     }
 }
 
