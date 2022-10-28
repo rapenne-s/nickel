@@ -197,6 +197,16 @@ pub enum TypecheckError {
         /* the error on the subtype unification */ Box<TypecheckError>,
         TermPos,
     ),
+    /// This is a temporary error due to the current limitation of checking type equality between
+    /// contracts. Checking if the unification of two contracts is valid is non-trivial even in
+    /// simple cases (see [#724](https://github.com/tweag/nickel/issues/724)). Currently, the
+    /// typechecker simply bails out of any attempt of contract unification, represented by this
+    /// error.
+    IncomparableFlatTypes(
+        RichTerm, /* the expected flat type */
+        RichTerm, /* the inferred flat type */
+        TermPos,
+    ),
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
@@ -225,8 +235,8 @@ impl ParseErrors {
         ParseErrors { errors: Vec::new() }
     }
 
-    pub fn from_recoverable<'a>(
-        errs: Vec<ErrorRecovery<usize, Token<'a>, parser::error::ParseError>>,
+    pub fn from_recoverable(
+        errs: Vec<ErrorRecovery<usize, Token<'_>, parser::error::ParseError>>,
         file_id: FileId,
     ) -> Self {
         ParseErrors {
@@ -258,8 +268,7 @@ impl ToDiagnostic<FileId> for ParseErrors {
     ) -> Vec<Diagnostic<FileId>> {
         self.errors
             .iter()
-            .map(|e| e.to_diagnostic(files, contract_id))
-            .flatten()
+            .flat_map(|e| e.to_diagnostic(files, contract_id))
             .collect()
     }
 }
@@ -799,8 +808,7 @@ impl ToDiagnostic<FileId> for Error {
             Error::ParseErrors(errs) => errs
                 .errors
                 .iter()
-                .map(|e| e.to_diagnostic(files, contract_id))
-                .flatten()
+                .flat_map(|e| e.to_diagnostic(files, contract_id))
                 .collect(),
             Error::TypecheckError(err) => err.to_diagnostic(files, contract_id),
             Error::EvalError(err) => err.to_diagnostic(files, contract_id),
@@ -909,7 +917,7 @@ impl ToDiagnostic<FileId> for EvalError {
                     .with_labels(labels)
                     .with_notes(notes)];
 
-                diagnostics.push(blame_label_note(&l));
+                diagnostics.push(blame_label_note(l));
 
                 if ty_path::is_only_codom(&l.path) {
                 } else if let Some(id) = contract_id {
@@ -993,7 +1001,7 @@ impl ToDiagnostic<FileId> for EvalError {
                 let mut diags = vec![Diagnostic::error()
                     .with_message(format!(
                         "missing definition for `{}`",
-                        field.unwrap_or(String::from("?"))
+                        field.unwrap_or_else(|| String::from("?"))
                     ))
                     .with_labels(labels)
                     .with_notes(vec![])];
@@ -1216,7 +1224,7 @@ impl ToDiagnostic<FileId> for ParseError {
                 ))
                 .with_labels(vec![primary(span)]),
             ParseError::InvalidUniRecord(illegal_span, tail_span, span) => Diagnostic::error()
-                .with_message(format!("invalid record literal"))
+                .with_message("invalid record literal")
                 .with_labels(vec![
                     primary(span),
                     secondary(illegal_span).with_message("can't use this record construct"),
@@ -1227,7 +1235,7 @@ impl ToDiagnostic<FileId> for ParseError {
                     String::from("Value assignements, such as `<field> = <expr>`, metadata, etc. are forbidden."),
                 ]),
             ParseError::RecursiveLetPattern(span) => Diagnostic::error()
-                .with_message(format!("recursive destructuring is not supported"))
+                .with_message("recursive destructuring is not supported")
                 .with_labels(vec![
                     primary(span),
                 ])
@@ -1449,6 +1457,23 @@ impl ToDiagnostic<FileId> for TypecheckError {
 
                 diags
             }
+            TypecheckError::IncomparableFlatTypes(expd, actual, span_opt) => {
+                vec![Diagnostic::error()
+                    .with_message("can't compare contract types")
+                    .with_labels(mk_expr_label(span_opt))
+                    .with_notes(vec![
+                        format!("The type of the expression was expected to be `{}`", expd.as_ref().shallow_repr()),
+                        format!("The type of the expression was inferred to be `{}`", actual.as_ref().shallow_repr()),
+                        String::from("Nickel can't compare contracts during typechecking"),
+                    ]),
+                    Diagnostic::note()
+                    .with_notes(vec![
+                        String::from("Due to a temporary limitation, contracts don't mix well with static types (see https://github.com/tweag/nickel/issues/724). This error may happen when using a contract as a type annotation or when calling to a function whose type contain contracts."),
+                        String::from("As a temporary fix, please annotate the offending expression with its expected type using the pipe operator `|`. This disables static typing for the given expression."),
+                        String::from("For example: if `foo` has type `MyContract -> Num`, rewrite `foo value + 1` as `(foo value | Num) + 1`."),
+                    ])
+                ]
+            }
         }
     }
 }
@@ -1474,8 +1499,7 @@ impl ToDiagnostic<FileId> for ImportError {
                 let mut diagnostic: Vec<Diagnostic<FileId>> = error
                     .errors
                     .iter()
-                    .map(|e| e.to_diagnostic(files, contract_id))
-                    .flatten()
+                    .flat_map(|e| e.to_diagnostic(files, contract_id))
                     .collect();
 
                 if let Some(span) = span_opt.as_opt_ref() {

@@ -356,7 +356,7 @@ we can substitute a parameter for a whole sequence of field declarations, also
 referred to as rows:
 
 ```nickel
-(let addTotal: forall a b. {total: Num | a} -> {total: Num | b} -> Num
+(let addTotal: forall a b. {total: Num ; a} -> {total: Num ; b} -> Num
   = fun r1 r2 => r1.total + r2.total in
 let r1 = {jan = 200, feb = 300, march = 10, total = jan + feb} in
 let r2 = {aug = 50, sept = 20, total = aug + sept} in
@@ -372,18 +372,18 @@ Result:
 {partial1 = 570, partial2 = 1770}
 ```
 
-In the type of `addTotal`, the part `{total: Num | a}` expresses exactly what we
+In the type of `addTotal`, the part `{total: Num ; a}` expresses exactly what we
 wanted: the argument must have a field `total: Num`, but the *tail* (the rest of
 the record type) is polymorphic, and `a` may be substituted for arbitrary fields
 (such as `jan: Num, feb: Num`). We used two different generic parameters `a` and
 `b`, to express that the tails of the arguments may differ.  If we used `a` in
-both places, as in `forall a. {total: Num | a} -> {total: Num | a} -> Num`, we
+both places, as in `forall a. {total: Num ; a} -> {total: Num ; a} -> Num`, we
 could still write `addTotal {total = 1, foo = 1} {total = 2, foo = 2}` but not
 `addTotal {total = 1, foo = 1} {total = 2, bar = 2}`. Using distinct parameters
 `a` and `b` gives us maximum flexibility.
 
 What comes before the tail may include several fields, is in e.g. `forall a.
-{total: Num, subtotal: Num | a} -> Num`.
+{total: Num, subtotal: Num ; a} -> Num`.
 
 <!-- Note that row polymorphism also works with enums, with the same intuition of a -->
 <!-- tail that can be substituted for something else. For example: -->
@@ -594,6 +594,12 @@ there will be a contract error anyway". While a type annotation switches the
 typechecker on, a contract annotation switches it back off.
 
 ## Using contracts as types
+
+**Warning**: as of version 0.2.x, using contracts as types won't work in the
+majority of cases (typechecking will fail with a "can't compare contract types"
+error). This is temporary and will likely be fixed in the upcoming 0.3.x release. For more
+details, see issues [#701](https://github.com/tweag/nickel/issues/701) and
+[#724](https://github.com/tweag/nickel/issues/724).
 
 <!-- TODO: find a good name for this section. Will need rework after merging
 types and contracts syntax -->

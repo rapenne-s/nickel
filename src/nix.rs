@@ -133,7 +133,7 @@ impl ToNickel for rnix::SyntaxNode {
                         elaborate_field_path(p, val)
                     })
                     .collect();
-                let inherited: Vec<(_, Option<RichTerm>)> = n
+                let inherited: Vec<(Vec<_>, Option<RichTerm>)> = n
                     .inherits()
                     .map(|inh| {
                         let term_from = inh.from().map(|n| n.inner().unwrap().translate(state));
@@ -142,7 +142,7 @@ impl ToNickel for rnix::SyntaxNode {
                     })
                     .collect();
 
-                RichTerm::from(build_record(fields, Default::default()))
+                build_record(fields, Default::default()).into()
             }
 
             // In nix it's allowed to define vars named `true`, `false` or `null`.

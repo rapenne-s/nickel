@@ -314,10 +314,9 @@ impl MetaValue {
             // If both have type annotations, the result will have the outer one as a type annotation.
             // However we still need to enforce the corresponding contract to preserve the operational
             // semantics. Thus, the inner type annotation is derelicted to a contract.
-            match inner.types.take() {
-                Some(ctr) => contracts.push(ctr),
-                _ => (),
-            };
+            if let Some(ctr) = inner.types.take() {
+                contracts.push(ctr)
+            }
         }
 
         contracts.extend(inner.contracts.into_iter());
@@ -397,9 +396,10 @@ impl Term {
             MetaValue(ref mut meta) => {
                 meta.contracts
                     .iter_mut()
-                    .for_each(|Contract { types, .. }| match types.0 {
-                        AbsType::Flat(ref mut rt) => func(rt),
-                        _ => (),
+                    .for_each(|Contract { types, .. }| {
+                        if let AbsType::Flat(ref mut rt) = types.0 {
+                            func(rt)
+                        }
                     });
                 meta.value.iter_mut().for_each(func);
             }
@@ -682,6 +682,10 @@ impl SharedTerm {
 
     pub fn make_mut(this: &mut Self) -> &mut Term {
         Rc::make_mut(&mut this.shared)
+    }
+
+    pub fn ptr_eq(this: &SharedTerm, that: &SharedTerm) -> bool {
+        Rc::ptr_eq(&this.shared, &that.shared)
     }
 }
 
@@ -1070,8 +1074,7 @@ impl RichTerm {
     pub fn without_pos(mut self) -> Self {
         fn clean_pos(rt: &mut RichTerm) {
             rt.pos = TermPos::None;
-            SharedTerm::make_mut(&mut rt.term)
-                .apply_to_rich_terms(|rt: &mut RichTerm| clean_pos(rt));
+            SharedTerm::make_mut(&mut rt.term).apply_to_rich_terms(clean_pos);
         }
 
         clean_pos(&mut self);

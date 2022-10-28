@@ -64,6 +64,7 @@ pub mod operation;
 pub mod reporting;
 #[macro_use]
 pub mod mk_typewrapper;
+pub mod eq;
 
 use error::*;
 use operation::{get_bop_type, get_nop_type, get_uop_type};
@@ -425,7 +426,7 @@ fn walk<L: Linearizer>(
                 ..
                 } => {
                     let tyw2 = TypeWrapper::from(ty2.clone());
-                    let instantiated = instantiate_foralls(state, tyw2.clone(), ForallInst::Constant);
+                    let instantiated = instantiate_foralls(state, tyw2, ForallInst::Constant);
                     type_check_(state, envs, lin, linearizer, t, instantiated)
                 }
                 MetaValue {value: Some(t), .. } =>  walk(state, envs, lin, linearizer, t),
@@ -487,7 +488,7 @@ fn inject_pat_vars(pat: &Destruct, envs: &mut Envs) {
                 let id = bind_id.as_ref().unwrap_or(id);
                 envs.insert(id.clone(), TypeWrapper::Concrete(AbsType::Dyn()));
                 if !pat.is_empty() {
-                    inject_pat_vars(&pat, envs);
+                    inject_pat_vars(pat, envs);
                 }
             }
         });
@@ -1148,6 +1149,15 @@ impl TypeWrapper {
             Ptr(x) => Ptr(x),
         }
     }
+
+    /// Create an iterator on rows represented by this type.
+    ///
+    /// The iterator continues as long as the next item is of the form `RowExtend(..)`, and
+    /// stops once it reaches `RowEmpty` (which ends iteration), or something else which is not a
+    /// `RowExtend` (which produces a last item [`typecheck::RowIteratorItem::Tail`]).
+    pub fn iter_as_rows(&self) -> RowIterator<'_> {
+        RowIterator { next: Some(self) }
+    }
 }
 
 impl From<AbsType<Box<TypeWrapper>>> for TypeWrapper {
@@ -1159,6 +1169,35 @@ impl From<AbsType<Box<TypeWrapper>>> for TypeWrapper {
 impl From<Types> for TypeWrapper {
     fn from(ty: Types) -> Self {
         TypeWrapper::Concrete(ty.0.map(|ty_| Box::new(TypeWrapper::from(*ty_))))
+    }
+}
+
+pub enum RowIteratorItem<'a> {
+    /// A non-empty tail.
+    Tail(&'a TypeWrapper),
+    /// A row binding.
+    Row(&'a Ident, Option<&'a TypeWrapper>),
+}
+
+pub struct RowIterator<'a> {
+    next: Option<&'a TypeWrapper>,
+}
+
+impl<'a> Iterator for RowIterator<'a> {
+    type Item = RowIteratorItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next.and_then(|next| match next {
+            TypeWrapper::Concrete(AbsType::RowEmpty()) => None,
+            TypeWrapper::Concrete(AbsType::RowExtend(id, ty_row, tail)) => {
+                self.next = Some(tail);
+                Some(RowIteratorItem::Row(id, ty_row.as_ref().map(Box::as_ref)))
+            }
+            ty => {
+                self.next = None;
+                Some(RowIteratorItem::Tail(ty))
+            }
+        })
     }
 }
 
@@ -1258,15 +1297,7 @@ pub fn unify(state: &mut State, mut t1: TypeWrapper, mut t2: TypeWrapper) -> Res
                     )
                 })
             }
-            (AbsType::Flat(s), AbsType::Flat(t)) => match (s.as_ref(), t.as_ref()) {
-                (Term::Var(vs), Term::Var(ts)) if vs == ts => Ok(()),
-                (Term::Var(_), Term::Var(_)) => Err(UnifError::TypeMismatch(
-                    TypeWrapper::Concrete(AbsType::Flat(s)),
-                    TypeWrapper::Concrete(AbsType::Flat(t)),
-                )),
-                (Term::Var(_), _) => Err(UnifError::IllformedFlatType(t)),
-                _ => Err(UnifError::IllformedFlatType(s)),
-            },
+            (AbsType::Flat(s), AbsType::Flat(t)) => Err(UnifError::IncomparableFlatTypes(s, t)),
             (r1, r2) if r1.is_row_type() && r2.is_row_type() => {
                 unify_rows(state, r1.clone(), r2.clone()).map_err(|err| {
                     err.into_unif_err(TypeWrapper::Concrete(r1), TypeWrapper::Concrete(r2))
@@ -1692,6 +1723,6 @@ fn get_wildcard_var(
 fn wildcard_vars_to_type(wildcard_vars: Vec<TypeWrapper>, table: &UnifTable) -> Wildcards {
     wildcard_vars
         .into_iter()
-        .map(|var| to_type(&table, var))
+        .map(|var| to_type(table, var))
         .collect()
 }
