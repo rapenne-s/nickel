@@ -694,7 +694,7 @@ fn type_check_<L: Linearizer>(
         }
         // If some fields are defined dynamically, the only potential type that works is `{_ : a}`
         // for some `a`
-        Term::RecRecord(stat_map, dynamic, ..) if !dynamic.is_empty() => {
+        Term::RecRecord(stat_map, dynamic, _, _, inh) if !dynamic.is_empty() => {
             let ty_dyn = state.table.fresh_unif_var();
 
             for id in stat_map.keys() {
@@ -722,7 +722,26 @@ fn type_check_<L: Linearizer>(
             // For recursive records, we look at the apparent type of each field and bind it in
             // env before actually typechecking the content of fields.
             // Fields defined by interpolation are ignored.
-            if let Term::RecRecord(..) = t.as_ref() {
+            if let Term::RecRecord(_, _, _, _, inh) = t.as_ref() {
+                for (ids, rt) in inh.iter().filter(|(_, rt)| rt.is_some()) {
+                    let rt = rt.as_ref().unwrap();
+                    let rec_tyw = state.table.fresh_unif_var();
+                    let rec_tyw = ids.iter().fold(rec_tyw, |tail, id| {
+                        let tyw = state.table.fresh_unif_var();
+                        envs.insert(id.clone(), tyw.clone());
+                        linearizer.retype_ident(lin, id, tyw.clone());
+                        mk_tyw_row!((id.clone(), tyw); tail)
+                    });
+                    type_check_(
+                        state,
+                        envs.clone(),
+                        lin,
+                        linearizer.scope(),
+                        rt,
+                        rec_tyw.clone(),
+                    )?;
+                }
+
                 for (id, rt) in stat_map {
                     let tyw = binding_type(state, rt.as_ref(), &envs, true);
                     envs.insert(id.clone(), tyw.clone());
@@ -775,6 +794,14 @@ fn type_check_<L: Linearizer>(
                         Ok(mk_tyw_row!((id.clone(), ty); acc))
                     },
                 )?;
+                let row = if let Term::RecRecord(_, _, _, _, inh) = rt.as_ref() {
+                    inh.iter().flat_map(|(ids, _)| ids).fold(row, |acc, id| {
+                        let ty = envs.get(id).unwrap();
+                        mk_tyw_row!((id.clone(), ty); acc)
+                    })
+                } else {
+                    row
+                };
 
                 unify(state, ty, mk_tyw_record!(; row))
                     .map_err(|err| err.into_typecheck_err(state, rt.pos))
