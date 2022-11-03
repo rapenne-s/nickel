@@ -142,7 +142,7 @@ impl ToNickel for rnix::SyntaxNode {
                     })
                     .collect();
 
-                build_record(fields, Default::default()).into()
+                build_record(fields, Default::default(), inherited).into()
             }
 
             // In nix it's allowed to define vars named `true`, `false` or `null`.

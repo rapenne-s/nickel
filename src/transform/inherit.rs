@@ -5,6 +5,7 @@ use crate::term::{make, RichTerm, Term, UnaryOp};
 pub fn transform_one(rt: RichTerm) -> RichTerm {
     match_sharedterm! {rt.term, with {
     Term::RecRecord(fields, dyn_fields, attrs, deps, inh) => {
+        println!("inherit len: {}", inh.len());
         let mut fields = fields.clone();
         let renaming: Vec<(Vec<_>, Vec<_>, Option<RichTerm>)> = inh.into_iter().map(|(ids, rt)| {
             if rt.is_some() {

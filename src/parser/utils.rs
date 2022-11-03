@@ -185,7 +185,11 @@ pub fn elaborate_field_path(
 
 /// Build a record from a list of field definitions. If a field is defined several times, the
 /// different definitions are merged.
-pub fn build_record<I>(fields: I, attrs: RecordAttrs) -> Term
+pub fn build_record<I>(
+    fields: I,
+    attrs: RecordAttrs,
+    inh: Vec<(Vec<Ident>, Option<RichTerm>)>,
+) -> Term
 where
     I: IntoIterator<Item = (FieldPathElem, RichTerm)> + Debug,
 {
@@ -253,7 +257,7 @@ where
         }
     });
 
-    Term::RecRecord(static_map, dynamic_fields, attrs, None, vec![])
+    Term::RecRecord(static_map, dynamic_fields, attrs, None, inh)
 }
 
 /// Merge two fields by performing the merge of both their value and MetaValue if any.

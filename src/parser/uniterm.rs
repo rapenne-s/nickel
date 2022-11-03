@@ -274,7 +274,7 @@ impl TryFrom<UniRecord> for RichTerm {
                 elaborate_field_path(path, rt)
             });
 
-            Ok(RichTerm::from(build_record(elaborated, attrs)))
+            Ok(RichTerm::from(build_record(elaborated, attrs, vec![])))
         };
 
         result.map(|rt| rt.with_pos(pos))
