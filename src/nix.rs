@@ -3,7 +3,7 @@ use crate::conversion::State;
 pub use crate::conversion::ToNickel;
 use crate::identifier::Ident;
 use crate::mk_app;
-use crate::parser::utils::mk_span;
+use crate::parser::utils::{mk_span, FieldPathElem};
 use crate::term::make::{self, if_then_else};
 use crate::term::{BinaryOp, UnaryOp};
 use crate::term::{MergePriority, MetaValue, RichTerm, Term};
@@ -11,6 +11,32 @@ use codespan::FileId;
 use rnix;
 use rnix::types::{BinOp, EntryHolder, TokenWrapper, TypedNode, UnaryOp as UniOp};
 use std::collections::HashMap;
+use std::iter::repeat_with;
+
+fn path_elem_from_nix(n: rnix::SyntaxNode, state: &State) -> FieldPathElem {
+    match n.kind() {
+        NODE_IDENT => FieldPathElem::Ident(rnix::types::Ident::cast(n).unwrap().as_str().into()),
+        _ => FieldPathElem::Expr(n.translate(state)),
+    }
+}
+
+fn path_rts_from_nix(n: rnix::SyntaxNode, state: &State) -> Vec<RichTerm> {
+    fn path_elem_rt(n: rnix::SyntaxNode, state: &State) -> RichTerm {
+        match n.kind() {
+            NODE_IDENT => Term::Str(n.to_string()).into(),
+            _ => n.translate(state),
+        }
+    }
+    match n.kind() {
+        rnix::SyntaxKind::NODE_SELECT => {
+            let n = rnix::types::Select::cast(n).unwrap();
+            let mut tail = path_rts_from_nix(n.set().unwrap(), state);
+            tail.push(path_elem_rt(n.index().unwrap(), state));
+            tail
+        }
+        _ => vec![path_elem_rt(n, state)],
+    }
+}
 
 impl ToNickel for UniOp {
     fn translate(self, state: &State) -> RichTerm {
@@ -33,12 +59,9 @@ impl ToNickel for BinOp {
             // using `str_concat` or `array_concat` in respect to `typeof a`.
             Concat => make::op2(BinaryOp::ArrayConcat(), lhs, rhs),
             IsSet => {
-                let rhs = if self.rhs().unwrap().kind() == rnix::SyntaxKind::NODE_IDENT {
-                    Term::Str(self.rhs().unwrap().to_string()).into()
-                } else {
-                    rhs
-                };
-                make::op2(BinaryOp::HasField(), rhs, lhs)
+                let path = path_rts_from_nix(self.rhs().unwrap(), state);
+                let rhs = Term::Array(path, Default::default());
+                mk_app!(crate::stdlib::compat::has_field_path(), rhs, lhs)
             }
             Update => unimplemented!(),
 
