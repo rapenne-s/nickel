@@ -29,13 +29,18 @@ impl ToNickel for BinOp {
         let lhs = self.lhs().unwrap().translate(state);
         let rhs = self.rhs().unwrap().translate(state);
         match self.operator().unwrap() {
-            // TODO: Should be fixed using a nickel function `compat.concat` of type `a -> a -> a`
-            // using `str_concat` or `array_concat` in respect to `typeof a`.
             Concat => make::op2(BinaryOp::ArrayConcat(), lhs, rhs),
-            IsSet => unimplemented!(),
+            IsSet => {
+                let rhs = if self.rhs().unwrap().kind() == rnix::SyntaxKind::NODE_IDENT {
+                    Term::Str(self.rhs().unwrap().to_string()).into()
+                } else {
+                    rhs
+                };
+                make::op2(BinaryOp::HasField(), rhs, lhs)
+            }
             Update => unimplemented!(),
 
-            Add => make::op2(BinaryOp::Plus(), lhs, rhs),
+            Add => mk_app!(crate::stdlib::compat::add(), lhs, rhs),
             Sub => make::op2(BinaryOp::Sub(), lhs, rhs),
             Mul => make::op2(BinaryOp::Mult(), lhs, rhs),
             Div => make::op2(BinaryOp::Div(), lhs, rhs),
