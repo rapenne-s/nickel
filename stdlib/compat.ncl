@@ -1,5 +1,5 @@
 {
-compat | doc "Nix compatibility layer. should not be used by Nickel program."
+compat | doc "Nix compatibility layer. This library should not be used by Nickel program."
 = {
   has_field_path = fun fields record =>
       %length% fields == 0 || # Because it's only used by generated code, this length will never be initialy 0. So if it's 0, it mean the end of the path.
@@ -7,6 +7,14 @@ compat | doc "Nix compatibility layer. should not be used by Nickel program."
         %has_field% (%head% fields) record &&
 	has_field_path (%tail% fields) record."%{%head% fields}"
       ),
+
+  # Addition in Nix is overloaded to work both as number addition and string concatenation.
+  # There is no such operator in Nickel. This function implement the equivalent of the Nix primitive operator by dynamically
+  # dispatching between addition and concatenation, based on the runtime type of its arguments.
+  add = fun a b =>
+    if %typeof% a == `Str && %typeof% b == `Str
+    then a ++ b
+    else a + b,
 
   with =
     let AssertFound = fun l val => if val.found 
