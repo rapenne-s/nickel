@@ -18,3 +18,8 @@ fn run(path: &str) {
 fn basics_nix() {
     run("basics.nix");
 }
+
+#[test]
+fn records_nix() {
+    run("records.nix");
+}

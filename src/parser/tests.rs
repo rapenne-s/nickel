@@ -181,6 +181,7 @@ fn record_terms() {
             Vec::new(),
             Default::default(),
             None,
+            vec![],
         )
         .into()
     );
@@ -200,6 +201,7 @@ fn record_terms() {
             )],
             Default::default(),
             None,
+            vec![],
         )
         .into()
     );
@@ -216,6 +218,7 @@ fn record_terms() {
             Vec::new(),
             Default::default(),
             None,
+            vec![],
         )
         .into()
     );
