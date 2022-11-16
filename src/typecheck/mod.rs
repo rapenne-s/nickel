@@ -371,7 +371,7 @@ fn walk<L: Linearizer>(
 
             walk(state, envs, lin, linearizer, exp)
         }
-        Term::RecRecord(stat_map, dynamic, ..) => {
+        Term::RecRecord(stat_map, dynamic, _, _, inh) => {
             for id in stat_map.keys() {
                 let binding_type = binding_type(
                     state,
@@ -387,6 +387,7 @@ fn walk<L: Linearizer>(
                 .iter()
                 .map(|(_, t)| t)
                 .chain(dynamic.iter().map(|(_, t)| t))
+                .chain(inh.iter().filter_map(|(_, t)| t.as_ref()))
                 .try_for_each(|t| -> Result<(), TypecheckError> {
                     walk(state, envs.clone(), lin, linearizer.scope(), t)
                 })
