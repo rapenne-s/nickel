@@ -1,7 +1,8 @@
 //! An environment for storing variables with scopes.
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{hash_map, HashMap};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -28,7 +29,44 @@ use std::rc::Rc;
 #[derive(Debug, PartialEq, Default)]
 pub struct Environment<K: Hash + Eq, V: PartialEq> {
     current: Rc<HashMap<K, V>>,
+    cached_hash: Option<u64>,
     previous: RefCell<Option<Rc<Environment<K, V>>>>,
+}
+
+// TODO: The way this is implemented probably means that it's possible for e1 == e2 semantically
+//       but hash(e1) != hash(e2), which is probably bad. (e.g., when environments contain the
+//       same terms, but insertion order was different).
+impl<K: Hash + Eq + Ord + Clone, V: Hash + PartialEq + Clone> Hash for Environment<K, V> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        if let Some(cached) = self.cached_hash {
+            state.write_u64(cached);
+        }
+    }
+}
+
+impl<K: Hash + Eq + Ord + Clone, V: Hash + PartialEq + Clone> Environment<K, V> {
+    /// Inserts a key-value pair into the Environment.
+    pub fn insert_memoize_hash(&mut self, key: K, value: V) {
+        if self.was_cloned() {
+            self.current = Rc::new(HashMap::new());
+        }
+        self.update_hash(&key, &value);
+        Rc::get_mut(&mut self.current).unwrap().insert(key, value);
+    }
+
+    fn update_hash(&mut self, key: &K, value: &V) {
+        let mut hasher = DefaultHasher::new();
+        if let Some(prev) = &*self.previous.borrow() {
+            if let Some(cached) = prev.cached_hash {
+                hasher.write_u64(cached);
+            }
+        }
+
+        (key, value).hash(&mut hasher);
+
+        let hash = hasher.finish();
+        self.cached_hash = Some(hash);
+    }
 }
 
 impl<K: Hash + Eq, V: PartialEq> Clone for Environment<K, V> {
@@ -42,12 +80,14 @@ impl<K: Hash + Eq, V: PartialEq> Clone for Environment<K, V> {
             self.previous.replace_with(|old| {
                 Some(Rc::new(Environment {
                     current: self.current.clone(),
+                    cached_hash: self.cached_hash,
                     previous: RefCell::new(old.clone()),
                 }))
             });
         }
         Self {
             current: Rc::new(HashMap::new()),
+            cached_hash: self.cached_hash,
             previous: self.previous.clone(),
         }
     }
@@ -58,6 +98,7 @@ impl<K: Hash + Eq, V: PartialEq> Environment<K, V> {
     pub fn new() -> Self {
         Self {
             current: Rc::new(HashMap::new()),
+            cached_hash: None,
             previous: RefCell::new(None),
         }
     }
@@ -132,6 +173,7 @@ impl<K: Hash + Eq, V: PartialEq> FromIterator<(K, V)> for Environment<K, V> {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self {
             current: Rc::new(HashMap::from_iter(iter)),
+            cached_hash: None,
             previous: RefCell::new(None),
         }
     }
