@@ -17,7 +17,7 @@ use crate::{
     mk_app, mk_fun,
     position::{RawSpan, TermPos},
     term::{
-        make as mk_term, record::RecordAttrs, record::RecordData, BinaryOp, Contract, MetaValue,
+        make as mk_term, record::{RecordAttrs, RecordData, Field}, BinaryOp, LabeledType, MetaValue,
         RichTerm, StrChunk, Term, UnaryOp,
     },
     types::{TypeF, Types},
@@ -142,7 +142,7 @@ pub fn combine_match_annots(
             Annot::combine(anns.unwrap_or_default(), default.unwrap_or_default())
         }
         (None, None) => MetaValue {
-            contracts: vec![Contract {
+            contracts: vec![LabeledType {
                 types: Types(TypeF::Dyn),
                 label: Label {
                     span,
@@ -255,7 +255,7 @@ pub fn elaborate_field_path(
         FieldPathElem::Ident(id) => {
             let mut fields = HashMap::new();
             fields.insert(id, acc);
-            Term::Record(RecordData::with_fields(fields)).into()
+            Term::Record(RecordData::with_field_values(fields)).into()
         }
         FieldPathElem::Expr(exp) => {
             let static_access = match exp.term.as_ref() {
@@ -277,7 +277,7 @@ pub fn elaborate_field_path(
                 let id = Ident::new_with_pos(static_access, exp.pos);
                 let mut fields = HashMap::new();
                 fields.insert(id, acc);
-                Term::Record(RecordData::with_fields(fields)).into()
+                Term::Record(RecordData::with_field_values(fields)).into()
             } else {
                 let empty = Term::Record(RecordData::empty());
                 mk_app!(mk_term::op2(BinaryOp::DynExtend(), exp, empty), acc)
@@ -359,7 +359,8 @@ where
     });
 
     Term::RecRecord(
-        RecordData::new(static_fields, attrs, None),
+        //TODO: add metadata gathered during parsing
+        RecordData::new(static_fields.into_iter().map(|(id, value)| (id, Field::from(value))).collect(), attrs, None),
         dynamic_fields,
         None,
     )

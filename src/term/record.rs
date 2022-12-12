@@ -1,5 +1,5 @@
-use super::{RichTerm, SealingKey};
-use crate::{identifier::Ident, label::Label};
+use super::{MergePriority, RichTerm, SealingKey, LabeledType, TypeAnnotation};
+use crate::{identifier::Ident, label::Label, types::Types};
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -73,6 +73,112 @@ pub struct RecordDeps {
     pub dyn_fields: Vec<FieldDeps>,
 }
 
+/// A type or a contract together with its corresponding label.
+// #[derive(Debug, PartialEq, Clone)]
+// pub struct LabeledType {
+//     pub types: Types,
+//     pub label: Label,
+// }
+
+/// The metadata attached to record fields.
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct FieldMetadata {
+    pub doc: Option<String>,
+    pub annotation: TypeAnnotation,
+    pub contracts: Vec<LabeledType>,
+    /// If the field is optional.
+    pub opt: bool,
+    pub priority: MergePriority,
+}
+
+impl FieldMetadata {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Flatten two nested metadata into one. If data that can't be combined (typically, the
+    /// documentation or the type annotation) are set by both, the outer's one are kept.
+    ///
+    /// Note that no environment management operation such as closurization of contracts takes
+    /// place, because this function is expected to be used on the AST before the evaluation (in
+    /// the parser or during program transformation).
+    pub fn flatten(mut outer: FieldMetadata, mut inner: FieldMetadata) -> FieldMetadata {
+        // Keep the outermost value for non-mergeable information, such as documentation, type annotation,
+        // and so on, which is the one that is accessible from the outside anyway (by queries, by the typechecker, and
+        // so on).
+        // Keep the inner value.
+
+        if outer.types.is_some() {
+            // If both have type annotations, the result will have the outer one as a type annotation.
+            // However we still need to enforce the corresponding contract to preserve the operational
+            // semantics. Thus, the inner type annotation is derelicted to a contract.
+            if let Some(ctr) = inner.types.take() {
+                outer.contracts.push(ctr)
+            }
+        }
+
+        outer.contracts.extend(inner.contracts.into_iter());
+
+        let priority = match (outer.priority, inner.priority) {
+            // Neutral corresponds to the case where no priority was specified. In that case, the
+            // other priority takes precedence.
+            (MergePriority::Neutral, p) | (p, MergePriority::Neutral) => p,
+            // Otherwise, we keep the maximum of both priorities, as we would do when merging
+            // values.
+            (p1, p2) => std::cmp::max(p1, p2),
+        };
+
+        FieldMetadata {
+            doc: outer.doc.or(inner.doc),
+            types: outer.types.or(inner.types),
+            contracts: outer.contracts,
+            opt: outer.opt || inner.opt,
+            priority,
+        }
+    }
+
+    /// Return an iterator over the type annotation, chained to contract annotations.
+    pub fn type_and_contracts(&self) -> impl Iterator<Item = &LabeledType> {
+        self.types.iter().chain(self.contracts.iter())
+    }
+}
+
+/// A record field with meta
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct Field {
+    /// The value is optional because record field may not have a definition (e.g. optional fields).
+    pub value: Option<RichTerm>,
+    pub metadata: FieldMetadata,
+}
+
+impl From<RichTerm> for Field {
+    fn from(rt: RichTerm) -> Self {
+        Field {
+            value: Some(rt),
+            ..Default::default()
+        }
+    }
+}
+
+impl Field {
+    pub fn map_value(self, f: impl FnOnce(RichTerm) -> RichTerm) -> Self {
+        Field {
+            metadata: self.metadata,
+            value: self.value.map(f),
+        }
+    }
+
+    pub fn try_map_value<E>(
+        self,
+        f: impl FnOnce(RichTerm) -> Result<RichTerm, E>,
+    ) -> Result<Self, E> {
+        Ok(Field {
+            metadata: self.metadata,
+            value: self.value.map(f).transpose()?,
+        })
+    }
+}
+
 /// The base structure of a Nickel record.
 ///
 /// Used to group together fields common to both the [super::Term::Record] and
@@ -80,7 +186,7 @@ pub struct RecordDeps {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RecordData {
     /// Fields whose names are known statically.
-    pub fields: HashMap<Ident, RichTerm>,
+    pub fields: HashMap<Ident, Field>,
     /// Attributes which may be applied to a record.
     pub attrs: RecordAttrs,
     /// The hidden part of a record under a polymorphic contract.
@@ -89,7 +195,7 @@ pub struct RecordData {
 
 impl RecordData {
     pub fn new(
-        fields: HashMap<Ident, RichTerm>,
+        fields: HashMap<Ident, Field>,
         attrs: RecordAttrs,
         sealed_tail: Option<SealedTail>,
     ) -> Self {
@@ -106,9 +212,22 @@ impl RecordData {
     }
 
     /// A record with the provided fields & the default set of attributes.
-    pub fn with_fields(fields: HashMap<Ident, RichTerm>) -> Self {
+    pub fn with_field_values(field_values: HashMap<Ident, RichTerm>) -> Self {
         let attrs = Default::default();
         let sealed_tail = Default::default();
+        let fields = field_values
+            .into_iter()
+            .map(|(id, value)| {
+                (
+                    id,
+                    Field {
+                        value: Some(value),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+
         RecordData {
             fields,
             attrs,
@@ -123,14 +242,38 @@ impl RecordData {
     /// external state while iterating.
     pub fn map_fields<F>(self, mut f: F) -> Self
     where
-        F: FnMut(Ident, RichTerm) -> RichTerm,
+        F: FnMut(Ident, Option<RichTerm>) -> Option<RichTerm>,
     {
         let fields = self
             .fields
             .into_iter()
-            .map(|(id, t)| (id, f(id, t)))
+            .map(|(id, field)| {
+                (
+                    id,
+                    Field {
+                        metadata: field.metadata,
+                        value: f(id, field.value),
+                    },
+                )
+            })
             .collect();
         RecordData { fields, ..self }
+    }
+
+    /// Returns the record resulting from applying the provided function to each field with a
+    /// defined value. Fields without a value are left unchanged.
+    pub fn map_fields_with_value<F>(self, mut f: F) -> Self
+    where
+        F: FnMut(Ident, RichTerm) -> RichTerm,
+    {
+        self.map_fields(|id, value| value.map(|v| f(id, v)))
+    }
+
+    pub fn into_iter_without_opts(self) -> impl Iterator<Item = (Ident, RichTerm)> {
+        self.fields.into_iter().filter_map(|(_, field)| {
+            if field.value.is_some() || !field.metadata.opt {
+                
+            }
     }
 }
 

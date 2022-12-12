@@ -131,7 +131,7 @@ where
     D: Deserializer<'de>,
 {
     let fields = HashMap::deserialize(deserializer)?;
-    Ok(RecordData::with_fields(fields))
+    Ok(RecordData::with_field_values(fields))
 }
 
 /// Serialize for an Array. Required to hide the internal attributes.
