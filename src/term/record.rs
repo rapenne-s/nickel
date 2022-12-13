@@ -85,7 +85,6 @@ pub struct RecordDeps {
 pub struct FieldMetadata {
     pub doc: Option<String>,
     pub annotation: TypeAnnotation,
-    pub contracts: Vec<LabeledType>,
     /// If the field is optional.
     pub opt: bool,
     pub priority: MergePriority,
@@ -108,16 +107,16 @@ impl FieldMetadata {
         // so on).
         // Keep the inner value.
 
-        if outer.types.is_some() {
+        if outer.annotation.types.is_some() {
             // If both have type annotations, the result will have the outer one as a type annotation.
             // However we still need to enforce the corresponding contract to preserve the operational
             // semantics. Thus, the inner type annotation is derelicted to a contract.
-            if let Some(ctr) = inner.types.take() {
-                outer.contracts.push(ctr)
+            if let Some(ctr) = inner.annotation.types.take() {
+                outer.annotation.contracts.push(ctr)
             }
         }
 
-        outer.contracts.extend(inner.contracts.into_iter());
+        outer.annotation.contracts.extend(inner.annotation.contracts.into_iter());
 
         let priority = match (outer.priority, inner.priority) {
             // Neutral corresponds to the case where no priority was specified. In that case, the
@@ -130,16 +129,13 @@ impl FieldMetadata {
 
         FieldMetadata {
             doc: outer.doc.or(inner.doc),
-            types: outer.types.or(inner.types),
-            contracts: outer.contracts,
+            annotation: TypeAnnotation {
+                types: outer.annotation.types.or(inner.annotation.types),
+                contracts: outer.annotation.contracts,
+            },
             opt: outer.opt || inner.opt,
             priority,
         }
-    }
-
-    /// Return an iterator over the type annotation, chained to contract annotations.
-    pub fn type_and_contracts(&self) -> impl Iterator<Item = &LabeledType> {
-        self.types.iter().chain(self.contracts.iter())
     }
 }
 
@@ -177,6 +173,10 @@ impl Field {
             value: self.value.map(f).transpose()?,
         })
     }
+
+    pub fn is_empty_optional(&self) -> bool {
+        self.value.is_none() && self.metadata.opt
+    }
 }
 
 /// The base structure of a Nickel record.
@@ -191,6 +191,17 @@ pub struct RecordData {
     pub attrs: RecordAttrs,
     /// The hidden part of a record under a polymorphic contract.
     pub sealed_tail: Option<SealedTail>,
+}
+
+
+/// Error raised by [RecordData] methods when trying to access a field that doesn't have a
+/// definition and isn't optional.
+pub struct MissingFieldDefinitionError(pub FieldMetadata);
+
+impl MissingFieldDefinitionError {
+    pub fn into_eval_err(self) -> crate::error::EvalError {
+        todo!()
+    }
 }
 
 impl RecordData {
@@ -269,11 +280,27 @@ impl RecordData {
         self.map_fields(|id, value| value.map(|v| f(id, v)))
     }
 
+    //TODO: wrong implementation. This ignores all field without a definition, even if not
+    //optional. We should return a `Result<_, Ident>` (or isomorphic to that) to indicate if a
+    //field is not optional but didn't have a definition.
     pub fn into_iter_without_opts(self) -> impl Iterator<Item = (Ident, RichTerm)> {
-        self.fields.into_iter().filter_map(|(_, field)| {
+        self.fields.into_iter().filter_map(|(id, field)| {
             if field.value.is_some() || !field.metadata.opt {
-                
+                field.value.map(|v| (id, v))
+            } else {
+                None
             }
+        })
+    }
+
+    /// Get the value of a field. Ignore optional fields without value: trying to get their value
+    /// returns `None`, as if they weren't present at all. Trying to extract a field without value
+    /// which is non optional return an error.
+    pub fn get_value(&self, id: &Ident) -> Result<Option<RichTerm>, MissingFieldDefinitionError> {
+        match self.fields.get(id) {
+            Some(Field { value: None, metadata: metadata @ FieldMetadata { opt: false, ..}, ..}) => Err(MissingFieldDefinitionError(metadata.clone())),
+            field_opt => Ok(field_opt.and_then(|field| field.value)),
+        }
     }
 }
 

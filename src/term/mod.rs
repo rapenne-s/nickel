@@ -452,6 +452,22 @@ impl TypeAnnotation {
     pub fn main_annot(&self) -> Option<&Types> {
         self.types.as_ref().or(self.contracts.first()).map(|labeled_ty| &labeled_ty.types)
     }
+    
+    /// Return the first defined label, which is either the one of type annotation if any, or the
+    /// label of the first contract annotation. It's useful when we need a label for error
+    /// reporting but don't really care which one specifically, e.g. for a missing field
+    /// definition error.
+    pub fn first_label(&self) -> Option<&Label> {
+
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &LabeledType> {
+        self.types.iter().chain(self.contracts.iter())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut LabeledType> {
+        self.types.iter_mut().chain(self.contracts.iter_mut())
+    }
 }
 
 /// A chunk of a string with interpolated expressions inside. Same as `Either<String,
