@@ -147,8 +147,11 @@ fn find_fields_from_term_kind(
             value: ValueState::Known(new_id),
             ..
         }
-        | TermKind::Declaration(_, _, ValueState::Known(new_id))
-        | TermKind::Usage(UsageState::Resolved(new_id)) => {
+        | TermKind::Declaration(_, _, ValueState::Known(new_id)) => {
+            find_fields_from_term_kind(linearization, new_id, path)
+        }
+        TermKind::Usage(UsageState::Resolved(new_id)) => {
+            // panic!("{:?}", linearization.get_item(new_id));
             find_fields_from_term_kind(linearization, new_id, path)
         }
         _ => None,
@@ -328,6 +331,7 @@ fn collect_record_info(
         .map(|item| {
             let (ty, _) = linearization.resolve_item_type_meta(item);
             match (&item.kind, ty) {
+                (TermKind::Record(data), _) => data.keys().cloned().collect(),
                 // Get record fields from static type info
                 (_, Types(TypeF::Record(rrows))) => find_fields_from_type(&rrows, path),
                 (TermKind::Declaration(_, _, ValueState::Known(body_id)), _) => {
@@ -623,7 +627,7 @@ mod tests {
                 .enumerate()
                 .map(|(index, id)| (id, index))
                 .collect();
-            Completed::new(linearization, id_to_index)
+            Completed::new(linearization, id_to_index, HashMap::new())
         }
 
         // ids is an array of the ids from this linearization
