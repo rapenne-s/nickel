@@ -1,7 +1,7 @@
 //! Additional AST nodes for the common UniTerm syntax (see RFC002 for more details).
 use super::*;
 use error::ParseError;
-use utils::{build_record, elaborate_field_path, FieldPath, FieldPathElem};
+use utils::{build_record, elaborate_field_def, FieldPath, FieldPathElem};
 
 use crate::{
     environment::Environment,
@@ -283,7 +283,7 @@ impl TryFrom<UniRecord> for RichTerm {
                 .into_iter()
                 .map(|(path, mut rt)| {
                     fix_field_types(&mut rt)?;
-                    Ok(elaborate_field_path(path, rt))
+                    Ok(elaborate_field_def(path, rt))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 

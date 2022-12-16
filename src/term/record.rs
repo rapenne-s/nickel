@@ -224,8 +224,6 @@ impl RecordData {
 
     /// A record with the provided fields & the default set of attributes.
     pub fn with_field_values(field_values: HashMap<Ident, RichTerm>) -> Self {
-        let attrs = Default::default();
-        let sealed_tail = Default::default();
         let fields = field_values
             .into_iter()
             .map(|(id, value)| {
@@ -241,8 +239,7 @@ impl RecordData {
 
         RecordData {
             fields,
-            attrs,
-            sealed_tail,
+            ..Default::default()
         }
     }
 

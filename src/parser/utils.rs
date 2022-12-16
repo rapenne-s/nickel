@@ -19,8 +19,7 @@ use crate::{
     term::{
         make as mk_term,
         record::{Field, FieldMetadata, RecordAttrs, RecordData},
-        BinaryOp, LabeledType, MetaValue, RichTerm, StrChunk, Term, UnaryOp,
-        TypeAnnotation,
+        BinaryOp, LabeledType, MetaValue, RichTerm, StrChunk, Term, TypeAnnotation, UnaryOp,
     },
     types::{TypeF, Types},
 };
@@ -64,10 +63,73 @@ pub enum ChunkLiteralPart<'input> {
     Char(char),
 }
 
+#[derive(Clone, Debug)]
+pub struct FieldDef {
+    path: FieldPath,
+    field: Field,
+}
+
+impl FieldDef {
+    /// Elaborate a record field definition specified as a path, like `a.b.c = foo`, into a regular
+    /// flat definition `a = {b = {c = foo}}`.
+    ///
+    /// # Preconditions
+    /// - /!\ path must be **non-empty**, otherwise this function panics
+    pub fn elaborate(self) -> (FieldPathElem, RichTerm) {
+        let mut it = self.path.into_iter();
+        let fst = it.next().unwrap();
+
+        let content = it.rev().fold(self.field, |acc, path_elem| match path_elem {
+            FieldPathElem::Ident(id) => {
+                let mut fields = HashMap::new();
+                fields.insert(id, acc);
+                Field::from(Term::Record(RecordData::new(fields, RecordAttrs::default(), None)).into())
+            }
+            FieldPathElem::Expr(exp) => {
+                let static_access = match exp.term.as_ref() {
+                    // Because of technicalities of lexing and parsing, some purely static strings
+                    // are parsed as a sequence of string chunks instead a single string literal.
+                    // We turn those into static access, as static accesses are better for
+                    // typechecking, code analysis by the LSP, etc.
+                    Term::StrChunks(chunks) => {
+                        chunks
+                            .iter()
+                            .fold(Some(String::new()), |acc, next| match (acc, next) {
+                                (Some(mut acc), StrChunk::Literal(lit)) => {
+                                    acc.push_str(lit);
+                                    Some(acc)
+                                }
+                                _ => None,
+                            })
+                    }
+                    _ => None,
+                };
+
+                if let Some(static_access) = static_access {
+                    let id = Ident::new_with_pos(static_access, exp.pos);
+                    let mut fields = HashMap::new();
+                    fields.insert(id, acc);
+                    Field::from(Term::Record(RecordData::new(fields, RecordAttrs::)).into())
+                } else {
+                    // The record we create isn't recursive, because it is only comprised of one
+                    // dynamic field. It's just simpler to use the infrastructure of `RecRecord` to
+                    // handle dynamic fields at evaluation time rather than right here
+                    Field {
+                        value: Some(Term::RecRecord(RecordData::empty(), vec![(exp, acc)], None).into()),
+                        ..Default::default()
+                    }
+                }
+            }
+        });
+
+        (fst, Field { value, ..Default::default())
+    }
+}
+
 /// The last field of a record, that can either be a normal field declaration or an ellipsis.
 #[derive(Clone, Debug)]
 pub enum RecordLastField {
-    Field((FieldPath, RichTerm)),
+    Field(FieldDef),
     Ellipsis,
 }
 
@@ -194,7 +256,10 @@ impl Annot for FieldAnnot {
             Some(value)
         };
 
-        Field { value, metadata: self.metadata }
+        Field {
+            value,
+            metadata: self.metadata,
+        }
     }
 
     fn combine(outer: Self, inner: Self) -> Self {
@@ -244,55 +309,6 @@ pub fn mk_access(access: RichTerm, root: RichTerm) -> RichTerm {
     } else {
         mk_term::op2(BinaryOp::DynAccess(), access, root)
     }
-}
-
-/// Elaborate a record field definition specified as a path, like `a.b.c = foo`, into a regular
-/// flat definition `a = {b = {c = foo}}`.
-///
-/// # Preconditions
-/// - /!\ path must be **non-empty**, otherwise this function panics
-pub fn elaborate_field_path(
-    path: Vec<FieldPathElem>,
-    content: RichTerm,
-) -> (FieldPathElem, RichTerm) {
-    let mut it = path.into_iter();
-    let fst = it.next().unwrap();
-
-    let content = it.rev().fold(content, |acc, path_elem| match path_elem {
-        FieldPathElem::Ident(id) => {
-            let mut fields = HashMap::new();
-            fields.insert(id, acc);
-            Term::Record(RecordData::with_field_values(fields)).into()
-        }
-        FieldPathElem::Expr(exp) => {
-            let static_access = match exp.term.as_ref() {
-                Term::StrChunks(chunks) => {
-                    chunks
-                        .iter()
-                        .fold(Some(String::new()), |acc, next| match (acc, next) {
-                            (Some(mut acc), StrChunk::Literal(lit)) => {
-                                acc.push_str(lit);
-                                Some(acc)
-                            }
-                            _ => None,
-                        })
-                }
-                _ => None,
-            };
-
-            if let Some(static_access) = static_access {
-                let id = Ident::new_with_pos(static_access, exp.pos);
-                let mut fields = HashMap::new();
-                fields.insert(id, acc);
-                Term::Record(RecordData::with_field_values(fields)).into()
-            } else {
-                let empty = Term::Record(RecordData::empty());
-                mk_app!(mk_term::op2(BinaryOp::DynExtend(), exp, empty), acc)
-            }
-        }
-    });
-
-    (fst, content)
 }
 
 /// Build a record from a list of field definitions. If a field is defined several times, the
