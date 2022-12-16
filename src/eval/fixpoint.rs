@@ -12,7 +12,7 @@ pub fn rec_env<'a, I: Iterator<Item = (&'a Ident, &'a Field)>, C: Cache>(
 ) -> Result<Vec<(Ident, CacheIndex)>, EvalError> {
     bindings
         .map(|(id, field)| {
-            if let Some(value) = field.value {
+            if let Some(ref value) = field.value {
                 match value.as_ref() {
                     Term::Var(ref var_id) => {
                         let idx = env
@@ -56,7 +56,7 @@ pub fn patch_field<C: Cache>(
     rec_env: &[(Ident, CacheIndex)],
     env: &Environment,
 ) -> Result<(), EvalError> {
-    if let Some(value) = field.value {
+    if let Some(ref value) = field.value {
         if let Term::Var(var_id) = &*value.term {
             // TODO: Shouldn't be mutable, [`CBNCache`] abstraction is leaking.
             let mut idx = env

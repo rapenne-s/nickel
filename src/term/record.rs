@@ -281,8 +281,8 @@ impl RecordData {
     }
 
     //TODO: wrong implementation. This ignores all field without a definition, even if not
-    //optional. We should return a `Result<_, Ident>` (or isomorphic to that) to indicate if a
-    //field is not optional but didn't have a definition.
+    // optional. We should return a `Result<_, Ident>` (or isomorphic to that) to indicate if a
+    // field is not optional but didn't have a definition.
     pub fn into_iter_without_opts(self) -> impl Iterator<Item = (Ident, RichTerm)> {
         self.fields.into_iter().filter_map(|(id, field)| {
             if field.value.is_some() || !field.metadata.opt {
@@ -293,13 +293,26 @@ impl RecordData {
         })
     }
 
+    //TODO: wrong implementation. This ignores all field without a definition, even if not
+    // optional. We should return a `Result<_, Ident>` (or isomorphic to that) to indicate if a
+    // field is not optional but didn't have a definition.
+    pub fn iter_without_opts(&self) -> impl Iterator<Item = (&Ident, &RichTerm)> {
+        self.fields.iter().filter_map(|(id, field)| {
+            if field.value.is_some() || !field.metadata.opt {
+                field.value.as_ref().map(|v| (id, v))
+            } else {
+                None
+            }
+        })
+    }
+
     /// Get the value of a field. Ignore optional fields without value: trying to get their value
     /// returns `None`, as if they weren't present at all. Trying to extract a field without value
     /// which is non optional return an error.
-    pub fn get_value(&self, id: &Ident) -> Result<Option<RichTerm>, MissingFieldDefinitionError> {
+    pub fn get_value(&self, id: &Ident) -> Result<Option<&RichTerm>, MissingFieldDefinitionError> {
         match self.fields.get(id) {
             Some(Field { value: None, metadata: metadata @ FieldMetadata { opt: false, ..}, ..}) => Err(MissingFieldDefinitionError(metadata.clone())),
-            field_opt => Ok(field_opt.and_then(|field| field.value)),
+            field_opt => Ok(field_opt.and_then(|field| field.value.as_ref())),
         }
     }
 }

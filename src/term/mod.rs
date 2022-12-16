@@ -449,16 +449,8 @@ pub struct TypeAnnotation {
 impl TypeAnnotation {
     /// Return the main annotation, which is either the type annotation if any, or the first
     /// contract annotation.
-    pub fn main_annot(&self) -> Option<&Types> {
-        self.types.as_ref().or(self.contracts.first()).map(|labeled_ty| &labeled_ty.types)
-    }
-    
-    /// Return the first defined label, which is either the one of type annotation if any, or the
-    /// label of the first contract annotation. It's useful when we need a label for error
-    /// reporting but don't really care which one specifically, e.g. for a missing field
-    /// definition error.
-    pub fn first_label(&self) -> Option<&Label> {
-
+    pub fn first(&self) -> Option<&LabeledType> {
+        self.types.as_ref().or(self.contracts.first())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &LabeledType> {
@@ -681,7 +673,7 @@ impl Term {
                     .fields
                     .iter()
                     .map(|(ident, field)| {
-                        if let Some(value) = field.value {
+                        if let Some(ref value) = field.value {
                             format!("{} = {}", ident, value.as_ref().deep_repr())
                         } else {
                             format!("{}", ident)

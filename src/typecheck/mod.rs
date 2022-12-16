@@ -607,6 +607,7 @@ pub fn mk_initial_ctxt(initial_env: &[RichTerm]) -> Result<Context, EnvBuildErro
                         *id,
                         field
                             .value
+                            .as_ref()
                             .expect(&format!(
                                 "expected stdlib module {} to have a definition",
                                 id
@@ -1621,12 +1622,13 @@ fn field_apparent_type(
     field
         .metadata
         .annotation
-        .main_annot()
+        .first()
         .cloned()
-        .map(ApparentType::Annotated)
+        .map(|labeled_ty| ApparentType::Annotated(labeled_ty.types))
         .or_else(|| {
             field
                 .value
+                .as_ref()
                 .map(|v| apparent_type(v.as_ref(), env, resolver))
         })
         .unwrap_or(ApparentType::Approximated(Types(TypeF::Dyn)))

@@ -408,7 +408,7 @@ fn contract_eq_fields<E: TermEnvironment>(
     field2: &Field,
     env2: &E,
 ) -> bool {
-    match (field1.value, field2.value) {
+    match (&field1.value, &field2.value) {
         (Some(ref value1), Some(ref value2)) => {
             contract_eq_bounded(state, value1, env1, value2, env2)
         }
