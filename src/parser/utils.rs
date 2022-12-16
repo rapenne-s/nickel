@@ -17,8 +17,10 @@ use crate::{
     mk_app, mk_fun,
     position::{RawSpan, TermPos},
     term::{
-        make as mk_term, record::{RecordAttrs, RecordData, Field}, BinaryOp, LabeledType, MetaValue,
-        RichTerm, StrChunk, Term, UnaryOp,
+        make as mk_term,
+        record::{Field, FieldMetadata, RecordAttrs, RecordData},
+        BinaryOp, LabeledType, MetaValue, RichTerm, StrChunk, Term, UnaryOp,
+        TypeAnnotation,
     },
     types::{TypeF, Types},
 };
@@ -105,20 +107,22 @@ impl InfixOp {
 }
 
 /// General interface for structures representing a series of annotations.
-pub trait Annot: Default + From<MetaValue> {
+pub trait Annot: Default + From<FieldMetadata> {
     /// Attach the annotation to a term.
-    fn attach(self, value: RichTerm, pos: TermPos) -> RichTerm;
+    fn attach_value(self, value: RichTerm) -> Field;
     /// Combine two annotations.
     fn combine(outer: Self, inner: Self) -> Self;
 }
 
 /// Consistency of naming inside the parser module.
-pub type MetaAnnot = MetaValue;
+pub type MetaAnnot = FieldMetadata;
 
-impl Annot for MetaValue {
-    fn attach(mut self, value: RichTerm, pos: TermPos) -> RichTerm {
-        self.value = Some(value);
-        RichTerm::new(Term::MetaValue(self), pos)
+impl Annot for FieldMetadata {
+    fn attach_value(self, value: RichTerm) -> Field {
+        Field {
+            value: Some(value),
+            metadata: self,
+        }
     }
 
     fn combine(outer: Self, inner: Self) -> Self {
@@ -141,14 +145,17 @@ pub fn combine_match_annots(
         (anns @ Some(_), default) | (anns, default @ Some(_)) => {
             Annot::combine(anns.unwrap_or_default(), default.unwrap_or_default())
         }
-        (None, None) => MetaValue {
-            contracts: vec![LabeledType {
-                types: Types(TypeF::Dyn),
-                label: Label {
-                    span,
-                    ..Default::default()
-                },
-            }],
+        (None, None) => FieldMetadata {
+            annotation: TypeAnnotation {
+                contracts: vec![LabeledType {
+                    types: Types(TypeF::Dyn),
+                    label: Label {
+                        span,
+                        ..Default::default()
+                    },
+                }],
+                ..Default::default()
+            },
             ..Default::default()
         },
     }
@@ -160,7 +167,7 @@ pub fn combine_match_annots(
 #[derive(Clone, Debug, Default)]
 pub struct FieldAnnot {
     /// Standard metadata.
-    pub meta: MetaValue,
+    pub metadata: FieldMetadata,
     /// Presence of an annotation `push force`
     pub rec_force: bool,
     /// Presence of an annotation `push default`
@@ -174,39 +181,39 @@ impl FieldAnnot {
 }
 
 impl Annot for FieldAnnot {
-    fn attach(mut self, value: RichTerm, pos: TermPos) -> RichTerm {
-        if self.rec_force || self.rec_default {
+    fn attach_value(mut self, value: RichTerm) -> Field {
+        let value = if self.rec_force || self.rec_default {
             let rec_prio = if self.rec_force {
                 RecPriority::Top
             } else {
                 RecPriority::Bottom
             };
 
-            self.meta.value = Some(rec_prio.apply_rec_prio_op(value).with_pos(pos));
+            Some(rec_prio.apply_rec_prio_op(value).with_pos(value.pos))
         } else {
-            self.meta.value = Some(value);
-        }
+            Some(value)
+        };
 
-        RichTerm::new(Term::MetaValue(self.meta), pos)
+        Field { value, metadata: self.metadata }
     }
 
     fn combine(outer: Self, inner: Self) -> Self {
-        let meta = MetaValue::flatten(outer.meta, inner.meta);
+        let metadata = FieldMetadata::flatten(outer.metadata, inner.metadata);
         let rec_force = outer.rec_force || inner.rec_force;
         let rec_default = outer.rec_default || inner.rec_default;
 
         FieldAnnot {
-            meta,
+            metadata,
             rec_force,
             rec_default,
         }
     }
 }
 
-impl From<MetaValue> for FieldAnnot {
-    fn from(meta: MetaValue) -> Self {
+impl From<FieldMetadata> for FieldAnnot {
+    fn from(metadata: FieldMetadata) -> Self {
         FieldAnnot {
-            meta,
+            metadata,
             ..Default::default()
         }
     }
@@ -360,7 +367,14 @@ where
 
     Term::RecRecord(
         //TODO: add metadata gathered during parsing
-        RecordData::new(static_fields.into_iter().map(|(id, value)| (id, Field::from(value))).collect(), attrs, None),
+        RecordData::new(
+            static_fields
+                .into_iter()
+                .map(|(id, value)| (id, Field::from(value)))
+                .collect(),
+            attrs,
+            None,
+        ),
         dynamic_fields,
         None,
     )

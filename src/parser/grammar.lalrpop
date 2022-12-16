@@ -376,11 +376,12 @@ Atom: UniTerm = {
 // A record field definition. The is the only place where we don't fix the type
 // variables inside the annotation right away (note the `Annot<Types>` instead
 // of `Annot<Fixed>`).
-RecordField: (FieldPath, RichTerm) = {
+RecordField: (FieldPath, Field) = {
     <l: @L> <path: FieldPath> <ann: FieldAnnot<Types>?> <r: @R> <t: ("=" <Term>)?> => {
         let pos = t.as_ref()
             .map(|t| t.pos.clone())
             .unwrap_or(mk_pos(src_id, l, r));
+
         let term = match (ann, t) {
             (Some(FieldAnnot { meta, rec_force: false, rec_default: false }), None) => {
                 RichTerm::new(Term::MetaValue(meta), pos)
