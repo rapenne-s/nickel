@@ -79,6 +79,23 @@ pub mod ty_path {
     /// - Type path: `Codomain(Domain(Nil()))`
     /// - Type : `Num -> Num -> Num`
     /// - Return: `(7, 10)`, which corresponds to the second `Num` occurrence.
+    ///
+    /// # Mismatch between path and ty
+    ///
+    /// If at some point the shape of the type `ty` doesn't correspond to the path (e.g. if the
+    /// next element is `Array`, but the types isn't of the form `Array T`), we just report the
+    /// span of the current subcontract. Initially, this situation couldn't happen, as the
+    /// implementation of builtin contracts ensures that e.g. an `Array` contract will always
+    /// correspond to a `Elem::Array` path element. But since `contract.apply`, we can pass an
+    /// existing label to an `Array` contract, e.g:
+    ///
+    /// ```nickel
+    /// let Foo = contract.apply (Array Num) in
+    /// ["a"] | Foo
+    /// ```
+    ///
+    /// Here, the type path will contain an `Array` (added by the builtin implementation of the
+    /// `Array` contract), but the original type will be `Foo`, which isn't of the form `Array T`.
     pub fn span<'a, I>(mut path_it: std::iter::Peekable<I>, mut ty: &Types) -> (usize, usize)
     where
         I: Iterator<Item = &'a Elem>,
@@ -139,7 +156,7 @@ pub mod ty_path {
                         let offset = (paren_offset * 2) + 4 + dom_end + forall_offset;
                         (codom_start + offset, codom_end + offset)
                     }
-                    _ => panic!(),
+                    _ => panic!("span(): seeing an arrow type, but the type path is neither domain nor codomain"),
                 }
             }
             (TypeF::Record(rows), Some(Elem::Field(ident))) => {
@@ -192,11 +209,11 @@ pub mod ty_path {
                     start_offset + paren_offset + sub_end,
                 )
             }
-            (ty, next) => panic!(
-                "label::span: unexpected type {} with path element {:?}",
-                Types(ty.clone()),
-                next
-            ),
+            // The type and the path don't match, we stop here.
+            _ => {
+                let repr = format!("{}", ty);
+                return (0, repr.len());
+            }
         }
     }
 }
