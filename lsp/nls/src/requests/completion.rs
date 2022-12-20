@@ -1,4 +1,6 @@
-use codespan::ByteIndex;
+use std::collections::HashMap;
+
+use codespan::{ByteIndex, FileId};
 use codespan_lsp::position_to_byte_index;
 use lazy_static::lazy_static;
 use log::debug;
@@ -115,8 +117,9 @@ fn find_fields_from_term_kind(
     linearization: &Completed,
     id: ItemId,
     path: &mut Vec<Ident>,
+    lin_cache: &HashMap<FileId, Completed>,
 ) -> Option<Vec<IdentWithType>> {
-    let item = linearization.get_item(id)?;
+    let item = linearization.get_item(id, lin_cache)?;
     match item.kind {
         TermKind::Record(ref fields) => {
             if path.is_empty() {
@@ -127,8 +130,8 @@ fn find_fields_from_term_kind(
                             // This unwrap is safe because, `id` is the field of the record
                             // we're currently analyzing. We're sure that the linearization
                             // phase doesn't produce wrong or invalid ids.
-                            let item = linearization.get_item(id).unwrap();
-                            let (ty, _) = linearization.resolve_item_type_meta(item);
+                            let item = linearization.get_item(id, lin_cache).unwrap();
+                            let (ty, _) = linearization.resolve_item_type_meta(item, lin_cache);
                             IdentWithType {
                                 ident,
                                 ty,
@@ -140,7 +143,7 @@ fn find_fields_from_term_kind(
             } else {
                 let name = path.pop()?;
                 let new_id = fields.get(&name)?;
-                find_fields_from_term_kind(linearization, *new_id, path)
+                find_fields_from_term_kind(linearization, *new_id, path, lin_cache)
             }
         }
         TermKind::RecordField {
@@ -148,11 +151,10 @@ fn find_fields_from_term_kind(
             ..
         }
         | TermKind::Declaration(_, _, ValueState::Known(new_id)) => {
-            find_fields_from_term_kind(linearization, new_id, path)
+            find_fields_from_term_kind(linearization, new_id, path, lin_cache)
         }
         TermKind::Usage(UsageState::Resolved(new_id)) => {
-            // panic!("{:?}", linearization.get_item(new_id));
-            find_fields_from_term_kind(linearization, new_id, path)
+            find_fields_from_term_kind(linearization, new_id, path, lin_cache)
         }
         _ => None,
     }
@@ -164,8 +166,9 @@ fn find_fields_from_contract(
     linearization: &Completed,
     id: ItemId,
     path: &mut Vec<Ident>,
+    lin_cache: &HashMap<FileId, Completed>,
 ) -> Option<Vec<IdentWithType>> {
-    let item = linearization.get_item(id)?;
+    let item = linearization.get_item(id, lin_cache)?;
     match &item.meta {
         Some(meta_value) => {
             let result = find_fields_from_meta_value(meta_value, path);
@@ -174,7 +177,7 @@ fn find_fields_from_contract(
         None => match item.kind {
             TermKind::Declaration(_, _, ValueState::Known(new_id))
             | TermKind::Usage(UsageState::Resolved(new_id)) => {
-                find_fields_from_contract(linearization, new_id, path)
+                find_fields_from_contract(linearization, new_id, path, lin_cache)
             }
             _ => None,
         },
@@ -325,11 +328,12 @@ fn collect_record_info(
     linearization: &Completed,
     id: ItemId,
     path: &mut Vec<Ident>,
+    lin_cache: &HashMap<FileId, Completed>,
 ) -> Vec<IdentWithType> {
     linearization
-        .get_item(id)
+        .get_item(id, lin_cache)
         .map(|item| {
-            let (ty, _) = linearization.resolve_item_type_meta(item);
+            let (ty, _) = linearization.resolve_item_type_meta(item, lin_cache);
             match (&item.kind, ty) {
                 // Get record fields from static type info
                 (_, Types(TypeF::Record(rrows))) => find_fields_from_type(&rrows, path),
@@ -340,8 +344,8 @@ fn collect_record_info(
                         ..
                     },
                     _,
-                ) => find_fields_from_contract(linearization, *body_id, path)
-                    .or_else(|| find_fields_from_term_kind(linearization, id, path))
+                ) => find_fields_from_contract(linearization, *body_id, path, lin_cache)
+                    .or_else(|| find_fields_from_term_kind(linearization, id, path, lin_cache))
                     .unwrap_or_default(),
                 _ => Vec::new(),
             }
@@ -366,7 +370,7 @@ fn get_completion_identifiers(
     ) -> Option<Vec<IdentWithType>> {
         let item_id = item.env.get(&name)?;
         let lin = server.lin_cache_get(&item_id.file_id).unwrap();
-        Some(collect_record_info(lin, *item_id, path))
+        Some(collect_record_info(lin, *item_id, path, &server.lin_cache))
     }
 
     let in_scope = match trigger {
@@ -394,9 +398,9 @@ fn get_completion_identifiers(
                 complete(item, name, server, &mut path).unwrap_or_default()
             } else {
                 // variable name completion
-                let (ty, _) = linearization.resolve_item_type_meta(item);
+                let (ty, _) = linearization.resolve_item_type_meta(item, &server.lin_cache);
                 linearization
-                    .get_in_scope(item)
+                    .get_in_scope(item, &server.lin_cache)
                     .iter()
                     .filter_map(|i| match i.kind {
                         TermKind::Declaration(ident, _, _) => Some(IdentWithType {
@@ -646,7 +650,7 @@ mod tests {
             let completed = make_completed(linearization);
             for id in ids {
                 let mut actual: Vec<_> =
-                    find_fields_from_term_kind(&completed, id, &mut Vec::new())
+                    find_fields_from_term_kind(&completed, id, &mut Vec::new(), &HashMap::new())
                         .unwrap()
                         .iter()
                         .map(|iwm| iwm.ident)
