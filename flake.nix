@@ -14,7 +14,7 @@
     };
     # `import-cargo` is still used for the WASM build for now, though we expect to get rid of it in the future.
     # See https://github.com/tweag/nickel/issues/967
-    import-cargo.url = "github:edolstra/import-cargo";
+    # import-cargo.url = "github:edolstra/import-cargo";
     crane = {
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -32,7 +32,7 @@
     , flake-utils
     , pre-commit-hooks
     , rust-overlay
-    , import-cargo
+    # , import-cargo
     , crane
     }:
     let
@@ -93,10 +93,10 @@
         ];
       };
 
-      cargoHome = (import-cargo.builders.importCargo {
-        lockFile = ./Cargo.lock;
-        inherit pkgs;
-      }).cargoHome;
+      # cargoHome = (import-cargo.builders.importCargo {
+      #   lockFile = ./Cargo.lock;
+      #   inherit pkgs;
+      # }).cargoHome;
 
       # Additional packages required for some systems to build Nickel
       missingSysPkgs =
@@ -266,10 +266,14 @@
             pkgs.wasm-pack
             pkgs.wasm-bindgen-cli
             pkgs.binaryen
-            cargoHome
+            (mkCraneArtifacts {inherit rust;}).cargoArtifacts
           ] ++ missingSysPkgs;
 
           buildPhase = ''
+            runHook preBuild
+            # this line removes a bug where value of $HOME is set to a non-writable /homeless-shelter dir
+            # see https://github.com/NixOS/nix/issues/670
+            export HOME=$(pwd)
             cd nickel-wasm-repl
             wasm-pack build --mode no-install -- --no-default-features --frozen --offline
             # Because of wasm-pack not using existing wasm-opt
@@ -277,6 +281,7 @@
             # run wasm-opt manually
             echo "[Nix build script] Manually running wasm-opt..."
             wasm-opt ${if optimize then "-O4 " else "-O0"} pkg/nickel_repl_bg.wasm -o pkg/nickel_repl.wasm
+            runHook postBuild
           '';
 
           installPhase = ''
